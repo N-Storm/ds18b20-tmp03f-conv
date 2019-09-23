@@ -18,6 +18,7 @@
 
 // Global temp
 temp_t temp;
+volatile uint16_t pwm_reg;
 
 // сброс датчика
 uint8_t therm_reset() {
@@ -118,6 +119,22 @@ bool therm_read_temperature() {
     return true;
 }
 
+void update_pwm_reg() {
+    cli();
+    pwm_reg = ((uint32_t)(TMP_LOW_CNT * 400) / (235 - temp.digit));
+    sei();
+}
+
+void read_and_update() {
+    therm_convert();
+    while (!therm_read_temperature());
+    update_pwm_reg();    
+}
+
+ISR(TIM0_COMPB_vect) {
+    OCR0A = pwm_reg;
+}
+
 void init() {
 	cli(); // Disable interrupts
 	CCP = 0xD8; // Magic number to enable configuration access
@@ -133,19 +150,28 @@ void init() {
 
 	THERM_DDR = 0xFF;
 
-	// PCICR = (1 << PCIE0); // Enable port change interrupt
-	// PCMSK = (1 << PCINT0) | (1 << PCINT1); // Enable interrupt on PB0, PB1 change
-	// EICRA |= (1 << ISC01) | (0 << ISC00); // The falling edge of INT0 generates an interrupt request.
-	// EIMSK |= (1 << INT0); // Enable INT0
+    /* Timer init
+     * PWM, Phase & Freq. Correct, TOP = OCR0A, 1:8 prescaler
+     * Counting up: Set OC0A/OC0B on compare match
+     * Counting down: Clear OC0A/OC0B on compare match
+     */
+    TCCR0A = (1 << WGM00) | (1 << COM0A0) | (1 << COM0A1);
+    TCCR0B = (1 << WGM03) | (1 << CS01);
+    TCCR0C = 0;
+    TIMSK0 = (1 << OCIE0B); // Enable OC0B interrupt (at BOTTOM)
 }
 
 int main(void) {
     init();    
 
     // Initial temp reading
-    therm_convert();
-    while (!therm_read_temperature());
+    read_and_update();
+    OCR0A = pwm_reg;
+    OCR0B = TMP_LOW_CNT;
+    
+    PRR = (1 << PRTIM0); // Enable Timer0
 
     while (1) {
+        read_and_update();
     }
 }
