@@ -1,6 +1,7 @@
 /*
  * File:   ds18b20-tmp03f-conv.c
  * Author: nstorm
+ * DS18B20 code author: http://blablacode.ru/mikrokontrollery/442
  */
 
 #define F_CPU 8000000
@@ -109,12 +110,21 @@ bool therm_read_temperature() {
     temperature[0] = therm_read_byte();
     temperature[1] = therm_read_byte();
     therm_reset();
+    
+    if ((temperature[1] & 0b11111000) != 0b11111000 || (temperature[1] & 0b11111000) != 0) // 5 upper bits are always sign bits and should be either all 1 or 0.
+        return false;
 
     temp.digit = temperature[0] >> 4;
-    temp.digit |= (temperature[1] & 0x7) << 4;
+    temp.digit |= (temperature[1] & 0xF) << 4;
 
     temp.decimal = temperature[0] & 0xF;
-    temp.decimal *= THERM_DECIMAL_STEPS_12BIT;
+    // temp.decimal *= THERM_DECIMAL_STEPS_12BIT;
+    
+    if (temp.decimal >= 0x8) // more than 0.5, round up
+        temp.digit++;
+    
+    if (temp.digit < -55 || temp.digit > 125) // OoR error
+        return false;
     
     return true;
 }
@@ -148,14 +158,14 @@ void init() {
 	PRR = 0b11; // Power Reduction Register
 	sei(); // Enable interrupts
 
-	THERM_DDR = 0xFF;
+	THERM_DDR = 0xFF; // 
 
     /* Timer init
      * PWM, Phase & Freq. Correct, TOP = OCR0A, 1:8 prescaler
      * Counting up: Set OC0A/OC0B on compare match
      * Counting down: Clear OC0A/OC0B on compare match
      */
-    TCCR0A = (1 << WGM00) | (1 << COM0A0) | (1 << COM0A1);
+    TCCR0A = (1 << WGM00) | (1 << COM0B0) | (1 << COM0B1);
     TCCR0B = (1 << WGM03) | (1 << CS01);
     TCCR0C = 0;
     TIMSK0 = (1 << OCIE0B); // Enable OC0B interrupt (at BOTTOM)
@@ -169,7 +179,7 @@ int main(void) {
     OCR0A = pwm_reg;
     OCR0B = TMP_LOW_CNT;
     
-    PRR = (1 << PRTIM0); // Enable Timer0
+    PRR = ~(1 << PRTIM0); // Enable Timer0
 
     while (1) {
         read_and_update();
