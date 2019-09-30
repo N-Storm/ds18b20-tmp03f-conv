@@ -179,7 +179,7 @@ int main(void) {
     OCR0A = pwm_reg;
     OCR0B = TMP_LOW_CNT;
     
-    PRR = ~(1 << PRTIM0); // Enable Timer0
+    PRR = (1 << PRTIM0) ^ 0b11; // Enable Timer0, without RMW
 
     while (1) {
         read_and_update();
